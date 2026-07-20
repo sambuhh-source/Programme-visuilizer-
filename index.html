@@ -348,6 +348,12 @@ input:checked + .slider-toggle:before{ transform:translateX(15px); }
 .gbar .lbl{
   position:relative; z-index:2; font-size:10px; font-weight:700; color:#fff; padding:0 7px;
   white-space:nowrap; text-shadow: 0 1px 1px rgba(0,0,0,0.3); pointer-events:none;
+  overflow:hidden; text-overflow:ellipsis; max-width:100%;
+}
+.lbl-outside{
+  position:absolute; z-index:6; display:flex; align-items:center; height:20px;
+  font-size:10px; font-weight:700; color: var(--sdc-navy); padding:0 0 0 7px;
+  white-space:nowrap; text-shadow:none; pointer-events:none;
 }
 .gbar .handle{ position:absolute; top:0; bottom:0; width:6px; z-index:3; }
 .gbar .handle.left{ left:0; cursor:w-resize; }
@@ -520,6 +526,8 @@ table.preview-table tr:hover{ background: var(--sdc-paper-dim); }
 .room-cell:hover .rc-del{ opacity:1; }
 .room-cell .rc-dup{ position:absolute; top:2px; right:20px; border:none; background:none; color:var(--sdc-steel); font-size:11px; font-weight:800; opacity:0; }
 .room-cell:hover .rc-dup{ opacity:1; }
+.room-cell .rc-rename{ position:absolute; top:2px; right:36px; border:none; background:none; color:var(--sdc-steel); font-size:11px; font-weight:800; opacity:0; }
+.room-cell:hover .rc-rename{ opacity:1; }
 .room-cell .rc-dup:hover{ color:var(--sdc-navy); }
 .add-room-row{ display:flex; gap:6px; margin-top:12px; }
 .add-room-row input{ flex:1; border:1px solid var(--sdc-line); border-radius:5px; padding:7px 9px; font-size:12px; }
@@ -1805,6 +1813,15 @@ function renderTaskRowsAndBars(){
 
       barLayer.appendChild(bar);
       attachDragHandlers(bar, task.id);
+
+      // If the name is wider than the bar, pull it out so it renders
+      // beside the bar instead of being clipped away and disappearing.
+      if(lbl.scrollWidth > bar.clientWidth - 14){
+        lbl.classList.add('lbl-outside');
+        lbl.style.left = (x + Math.max(w,6) + 4) + 'px';
+        lbl.style.top = (i*34 + 7) + 'px';
+        barLayer.appendChild(lbl);
+      }
     }
 
     // Baseline ghost bar
@@ -2410,8 +2427,36 @@ function duplicateRoom(roomId){
   const newRoom = { ...rm, id: 'rm-' + Math.random().toString(36).slice(2,8), name: rm.name + ' (copy)' };
   delete newRoom.x; delete newRoom.y; delete newRoom.pinDrawingId; // duplicate starts unplaced; position it separately
   state.rooms.push(newRoom);
-  toast(`Duplicated as "${newRoom.name}"`);
+
+  // Duplicate the tasks assigned to this room too, so the new room comes
+  // with its own copy of the work rather than an empty task list.
+  const tasksToCopy = state.tasks.filter(t=>t.rooms.includes(roomId));
+  tasksToCopy.forEach(t=>{
+    const copy = {
+      ...t,
+      id: t.id + '-copy-' + Math.random().toString(36).slice(2,5),
+      floors: [...t.floors],
+      rooms: [newRoom.id],
+      deps: (t.deps || []).map(d=>({ ...d }))
+    };
+    const idx = state.tasks.findIndex(x=>x.id===t.id);
+    state.tasks.splice(idx + 1, 0, copy);
+  });
+
+  toast(`Duplicated as "${newRoom.name}"${tasksToCopy.length ? ` with ${tasksToCopy.length} task${tasksToCopy.length===1?'':'s'}` : ''}`);
   return newRoom;
+}
+
+function renameRoom(roomId){
+  const rm = state.rooms.find(r=>r.id===roomId);
+  if(!rm) return;
+  const name = prompt('Rename room:', rm.name);
+  if(name === null) return;
+  const trimmed = name.trim();
+  if(!trimmed || trimmed === rm.name) return;
+  pushHistory();
+  rm.name = trimmed;
+  toast(`Renamed room to "${trimmed}"`);
 }
 
 function duplicateTask(){
@@ -2523,7 +2568,12 @@ function renderFloorManager(){
       const cnt = state.tasks.filter(t=>t.rooms.includes(rm.id)).length;
       const cell = document.createElement('div');
       cell.className = 'room-cell';
-      cell.innerHTML = `<span>${escapeHtml(rm.name)}</span><span class="rc-count">${cnt} task${cnt===1?'':'s'}</span><button class="rc-dup" type="button" title="Duplicate room">&#10697;</button><button class="rc-del" type="button" title="Delete room">&times;</button>`;
+      cell.innerHTML = `<span>${escapeHtml(rm.name)}</span><span class="rc-count">${cnt} task${cnt===1?'':'s'}</span><button class="rc-rename" type="button" title="Rename room">&#9998;</button><button class="rc-dup" type="button" title="Duplicate room">&#10697;</button><button class="rc-del" type="button" title="Delete room">&times;</button>`;
+      cell.querySelector('.rc-rename').addEventListener('click', ()=>{
+        renameRoom(rm.id);
+        renderFloorManager();
+        renderAll();
+      });
       cell.querySelector('.rc-dup').addEventListener('click', ()=>{
         duplicateRoom(rm.id);
         renderFloorManager();
@@ -2707,9 +2757,14 @@ function renderFloorView(){
       const active = activeTasksFor(rm.id);
       const cell = document.createElement('div');
       cell.className = 'room-cell' + (active.length?' has-active':'') + (rm.id===state.fvSelectedRoomId?' selected':'');
-      cell.innerHTML = `<span>${escapeHtml(rm.name)}</span><span class="rc-count">${active.length} active</span><button class="rc-dup" type="button" title="Duplicate room">&#10697;</button><button class="rc-del" type="button" title="Delete room">&times;</button>`;
+      cell.innerHTML = `<span>${escapeHtml(rm.name)}</span><span class="rc-count">${active.length} active</span><button class="rc-rename" type="button" title="Rename room">&#9998;</button><button class="rc-dup" type="button" title="Duplicate room">&#10697;</button><button class="rc-del" type="button" title="Delete room">&times;</button>`;
       cell.addEventListener('click', ()=>{
         state.fvSelectedRoomId = (state.fvSelectedRoomId===rm.id) ? null : rm.id;
+        renderFloorView();
+      });
+      cell.querySelector('.rc-rename').addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        renameRoom(rm.id);
         renderFloorView();
       });
       cell.querySelector('.rc-dup').addEventListener('click', (ev)=>{
@@ -2745,9 +2800,14 @@ function renderFloorView(){
     roomActionsEl.className = 'fv-room-actions';
     const isPinned = rm && rm.pinDrawingId===drawingId && rm.x!=null;
     roomActionsEl.innerHTML = `
+      <button type="button" id="fvRoomRename">Rename room</button>
       <button type="button" id="fvRoomDup">Duplicate room</button>
       ${isPinned ? '<button type="button" id="fvRoomUnpin">Remove pin</button>' : ''}
       <button type="button" id="fvRoomDelete" class="danger">Delete room</button>`;
+    document.getElementById('fvRoomRename').addEventListener('click', ()=>{
+      renameRoom(state.fvSelectedRoomId);
+      renderFloorView();
+    });
     document.getElementById('fvRoomDup').addEventListener('click', ()=>{
       const copy = duplicateRoom(state.fvSelectedRoomId);
       if(copy) state.fvSelectedRoomId = copy.id;
