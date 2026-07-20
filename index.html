@@ -3032,15 +3032,21 @@ function initFloorViewDrawingClick(){
 }
 
 // ---- Drag an existing pin to reposition it ----
+// A pin drag starts on mousedown, but real clicks always jitter the mouse by
+// a pixel or two — without a deadzone, that jitter alone was enough to count
+// as "moved" and yank the pin to the cursor, so a plain click almost never
+// landed as a select. Require CLICK_DRAG_THRESHOLD px of movement first.
 let pinDragCtx = null;
 let pinWasDragged = false;
 function pinDragStart(ev, roomId){
-  pinDragCtx = { roomId, moved:false, preDragSnapshot:null };
+  pinDragCtx = { roomId, startX: ev.clientX, startY: ev.clientY, moved:false, preDragSnapshot:null };
   pinWasDragged = false;
 }
 document.addEventListener('mousemove', (ev)=>{
   if(!pinDragCtx) return;
   if(!pinDragCtx.moved){
+    const dx = ev.clientX - pinDragCtx.startX, dy = ev.clientY - pinDragCtx.startY;
+    if(Math.hypot(dx, dy) < CLICK_DRAG_THRESHOLD) return; // still within click deadzone
     pinDragCtx.moved = true;
     pinDragCtx.preDragSnapshot = snapshot(); // capture BEFORE any mutation, so undo can restore it
   }
