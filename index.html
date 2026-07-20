@@ -589,15 +589,22 @@ table.preview-table tr:hover{ background: var(--sdc-paper-dim); }
 
 .fv-tasklist{ flex:1; min-width:280px; }
 .fv-tasklist h4{ font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--sdc-ink-dim); margin-bottom:10px; }
+.fv-tasklist-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.fv-tasklist-head h4{ margin-bottom:0; }
+#fvAddTask{ border:1px solid var(--sdc-navy); background: var(--sdc-navy); color:#fff; border-radius:5px; padding:5px 10px; font-size:11px; font-weight:700; margin-bottom:10px; }
+#fvAddTask:hover{ background: var(--sdc-blue); }
 .fv-room-actions{ display:flex; gap:6px; margin:-4px 0 12px; }
 .fv-room-actions button{ border:1px solid var(--sdc-line); background:#fff; border-radius:5px; padding:5px 10px; font-size:11px; font-weight:700; color:var(--sdc-navy); }
 .fv-room-actions button:hover{ background: var(--sdc-paper-dim); }
 .fv-room-actions button.danger{ color:var(--sdc-red); border-color: rgba(179,38,30,0.3); }
 .fv-room-actions button.danger:hover{ background: var(--sdc-red-bg); }
-.fv-task-card{ background: var(--sdc-paper); border-left:4px solid var(--sdc-navy); border-radius:5px; padding:9px 12px; margin-bottom:7px; font-size:12px; cursor:pointer; }
+.fv-task-card{ background: var(--sdc-paper); border-left:4px solid var(--sdc-navy); border-radius:5px; padding:9px 12px; margin-bottom:7px; font-size:12px; cursor:pointer; position:relative; }
 .fv-task-card:hover{ background: var(--sdc-paper-dim); }
-.fv-task-card .fv-tn{ font-weight:700; margin-bottom:2px; }
+.fv-task-card .fv-tn{ font-weight:700; margin-bottom:2px; padding-right:16px; }
 .fv-task-card .fv-tm{ font-size:10.5px; color: var(--sdc-ink-dim); font-family:var(--font-mono); }
+.fv-task-card .fv-tdel{ position:absolute; top:7px; right:8px; border:none; background:none; color:var(--sdc-ink-dim); font-size:13px; font-weight:800; opacity:0; line-height:1; }
+.fv-task-card:hover .fv-tdel{ opacity:1; }
+.fv-task-card .fv-tdel:hover{ color:var(--sdc-red); }
 .fv-unplaced-chip{
   display:flex; align-items:center; justify-content:space-between; gap:8px; background: var(--sdc-amber-bg);
   border:1px solid rgba(184,114,10,0.25); border-radius:5px; padding:6px 10px; margin-bottom:6px; font-size:11.5px;
@@ -876,7 +883,10 @@ table.preview-table tr:hover{ background: var(--sdc-paper-dim); }
             <div class="room-grid" id="fvRoomGrid"></div>
           </div>
           <div class="fv-tasklist">
-            <h4 id="fvTaskListTitle">Tasks on this floor</h4>
+            <div class="fv-tasklist-head">
+              <h4 id="fvTaskListTitle">Tasks on this floor</h4>
+              <button type="button" id="fvAddTask" title="Add a task here">+ Add task</button>
+            </div>
             <div id="fvRoomActions" style="display:none;"></div>
             <div id="fvUnplacedWrap" style="display:none;">
               <h4 style="margin-top:14px;">Unplaced rooms on this drawing</h4>
@@ -2402,6 +2412,7 @@ function saveDetailPanel(){
 
   cascadeDependencies(task.id);
   renderAll();
+  if(document.getElementById('floorview-overlay').classList.contains('open')) renderFloorView();
   closeDetailPanel();
   toast(`Saved "${task.name}"`);
 }
@@ -2416,6 +2427,7 @@ function deleteSelectedTask(){
   state.tasks.forEach(t=>{ if(t.deps) t.deps = t.deps.filter(d=>d.id!==task.id); });
   state.selectedTaskId = null;
   renderAll();
+  if(document.getElementById('floorview-overlay').classList.contains('open')) renderFloorView();
   closeDetailPanel();
   toast(`Deleted "${task.name}"`, 'warn');
 }
@@ -2843,13 +2855,42 @@ function renderFloorView(){
     const card = document.createElement('div');
     card.className = 'fv-task-card';
     card.style.borderLeftColor = tradeColor(t.trade);
-    card.innerHTML = `<div class="fv-tn">${escapeHtml(t.name)}</div><div class="fv-tm">${t.trade} · ${fmtDateDisplay(t.start)} → ${fmtDateDisplay(t.end)} · ${t.progress}%</div>`;
+    card.innerHTML = `<button type="button" class="fv-tdel" title="Delete task">&times;</button><div class="fv-tn">${escapeHtml(t.name)}</div><div class="fv-tm">${t.trade} · ${fmtDateDisplay(t.start)} → ${fmtDateDisplay(t.end)} · ${t.progress}%</div>`;
     card.addEventListener('click', ()=>{
-      closeFloorView();
       openDetailPanel(t.id);
+    });
+    card.querySelector('.fv-tdel').addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      if(!confirm(`Delete task "${t.name}"?`)) return;
+      pushHistory();
+      state.tasks = state.tasks.filter(x=>x.id!==t.id);
+      state.tasks.forEach(x=>{ if(x.deps) x.deps = x.deps.filter(d=>d.id!==t.id); });
+      if(state.selectedTaskId===t.id) state.selectedTaskId = null;
+      renderAll();
+      renderFloorView();
+      toast(`Deleted "${t.name}"`, 'warn');
     });
     listEl.appendChild(card);
   });
+}
+
+function addTaskInFloorView(){
+  if(!state.floorViewFloorId){ toast('Pick a floor first', 'warn'); return; }
+  const newId = 'T' + String(state.tasks.filter(t=>!t.id.startsWith('M')).length + 1).padStart(2,'0') + '-' + Math.random().toString(36).slice(2,5);
+  const today = fmtDate(todayUTC());
+  const newTask = {
+    id: newId, name: 'New Task', start: today, end: fmtDate(addDays(todayUTC(),5)),
+    duration: 5, float: 0, trade: 'Preliminaries',
+    floors: [state.floorViewFloorId],
+    rooms: state.fvSelectedRoomId ? [state.fvSelectedRoomId] : [],
+    progress: 0, milestone: false, notes: '', deps: []
+  };
+  pushHistory();
+  state.tasks.push(newTask);
+  renderAll();
+  renderFloorView();
+  openDetailPanel(newId);
+  toast('New task added — edit its details in the panel');
 }
 
 // ---- Click-to-place: clicking the drawing while placement mode is armed
@@ -3270,6 +3311,7 @@ function wireEvents(){
     if(!state.fvDrawingId){ toast('Pick a GA drawing first to place rooms on it', 'warn'); return; }
     setPlacementMode(state.fvPlacementMode === '__new__' ? null : '__new__');
   });
+  document.getElementById('fvAddTask').addEventListener('click', addTaskInFloorView);
   initFloorViewDrawingClick();
 
   document.getElementById('btnFloorsRooms').addEventListener('click', openFloorsModal);
