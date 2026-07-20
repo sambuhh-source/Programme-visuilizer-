@@ -587,8 +587,8 @@ table.preview-table tr:hover{ background: var(--sdc-paper-dim); }
 .fv-pin:hover{ transform: scale(1.15); z-index:2; }
 .fv-pin svg{ width:100%; height:100%; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4)); }
 .fv-pin .pin-body{ fill: var(--sdc-steel); stroke:#fff; stroke-width:1.5; }
-.fv-pin.has-active .pin-body{ fill: var(--sdc-green); }
-.fv-pin.selected .pin-body{ fill: var(--sdc-amber); }
+.fv-pin.has-active .pin-body{ stroke: var(--sdc-green); stroke-width:2.5; }
+.fv-pin.selected .pin-body{ stroke: var(--sdc-amber); stroke-width:2.5; }
 .fv-pin-label{
   position:absolute; bottom:100%; left:50%; margin-bottom:7px;
   transform:translateX(-50%) translateY(3px) scale(0.9); transform-origin:bottom center;
@@ -612,11 +612,19 @@ table.preview-table tr:hover{ background: var(--sdc-paper-dim); }
 .fv-tasklist-head h4{ margin-bottom:0; }
 #fvAddTask{ border:1px solid var(--sdc-navy); background: var(--sdc-navy); color:#fff; border-radius:5px; padding:5px 10px; font-size:11px; font-weight:700; margin-bottom:10px; }
 #fvAddTask:hover{ background: var(--sdc-blue); }
-.fv-room-actions{ display:flex; gap:6px; margin:-4px 0 12px; }
+.fv-room-actions{ display:flex; align-items:center; gap:6px; margin:-4px 0 12px; }
 .fv-room-actions button{ border:1px solid var(--sdc-line); background:#fff; border-radius:5px; padding:5px 10px; font-size:11px; font-weight:700; color:var(--sdc-navy); }
 .fv-room-actions button:hover{ background: var(--sdc-paper-dim); }
 .fv-room-actions button.danger{ color:var(--sdc-red); border-color: rgba(179,38,30,0.3); }
 .fv-room-actions button.danger:hover{ background: var(--sdc-red-bg); }
+.fv-pin-color-picker{
+  display:flex; align-items:center; gap:6px; border:1px solid var(--sdc-line); background:#fff;
+  border-radius:5px; padding:4px 10px 4px 6px; font-size:11px; font-weight:700; color:var(--sdc-navy); cursor:pointer;
+}
+.fv-pin-color-picker:hover{ background: var(--sdc-paper-dim); }
+.fv-pin-color-picker input[type="color"]{
+  width:20px; height:20px; padding:0; border:1px solid var(--sdc-line); border-radius:4px; cursor:pointer; background:none;
+}
 .fv-task-card{ background: var(--sdc-paper); border-left:4px solid var(--sdc-navy); border-radius:5px; padding:9px 12px; margin-bottom:7px; font-size:12px; cursor:pointer; position:relative; }
 .fv-task-card:hover{ background: var(--sdc-paper-dim); }
 .fv-task-card .fv-tn{ font-weight:700; margin-bottom:2px; padding-right:16px; }
@@ -2827,11 +2835,12 @@ function renderFloorView(){
       const active = activeTasksFor(rm.id);
       const pin = document.createElement('div');
       pin.className = 'fv-pin' + (active.length?' has-active':'') + (rm.id===state.fvSelectedRoomId?' selected':'');
+      pin.dataset.roomId = rm.id;
       pin.style.left = rm.x + '%';
       pin.style.top = rm.y + '%';
       pin.innerHTML = `
         <div class="fv-pin-label">${escapeHtml(rm.name)} · ${active.length} active</div>
-        <svg viewBox="0 0 24 24"><path class="pin-body" d="M12 1C7.6 1 4 4.6 4 9c0 6 8 14 8 14s8-8 8-14c0-4.4-3.6-8-8-8z"/><circle cx="12" cy="9" r="2.6" fill="#fff"/></svg>`;
+        <svg viewBox="0 0 24 24"><path class="pin-body" style="${rm.color ? `fill:${escapeHtml(rm.color)}` : ''}" d="M12 1C7.6 1 4 4.6 4 9c0 6 8 14 8 14s8-8 8-14c0-4.4-3.6-8-8-8z"/><circle cx="12" cy="9" r="2.6" fill="#fff"/></svg>`;
       pin.title = `${rm.name} — ${active.length} task(s) active in current window`;
       pin.addEventListener('mousedown', (ev)=>{
         ev.stopPropagation();
@@ -2920,10 +2929,32 @@ function renderFloorView(){
     roomActionsEl.className = 'fv-room-actions';
     const isPinned = rm && rm.pinDrawingId===drawingId && rm.x!=null;
     roomActionsEl.innerHTML = `
+      <label class="fv-pin-color-picker" title="Pin colour">
+        <input type="color" id="fvRoomColor" value="${rm.color || '#4a6491'}">
+        Pin colour
+      </label>
       <button type="button" id="fvRoomRename">Rename room</button>
       <button type="button" id="fvRoomDup">Duplicate room</button>
       ${isPinned ? '<button type="button" id="fvRoomUnpin">Remove pin</button>' : ''}
       <button type="button" id="fvRoomDelete" class="danger">Delete room</button>`;
+    let colorPreEditSnapshot = null;
+    document.getElementById('fvRoomColor').addEventListener('input', (ev)=>{
+      // Light-touch update while the picker is open — a full renderFloorView()
+      // here would rebuild this very control and close the native picker.
+      if(!colorPreEditSnapshot) colorPreEditSnapshot = snapshot();
+      rm.color = ev.target.value;
+      document.querySelectorAll(`.fv-pin[data-room-id="${rm.id}"] .pin-body`).forEach(el=>{ el.style.fill = rm.color; });
+    });
+    document.getElementById('fvRoomColor').addEventListener('change', ()=>{
+      if(colorPreEditSnapshot){
+        history.push(colorPreEditSnapshot);
+        if(history.length > HISTORY_LIMIT) history.shift();
+        future = [];
+        colorPreEditSnapshot = null;
+      }
+      saveState();
+      renderFloorView();
+    });
     document.getElementById('fvRoomRename').addEventListener('click', ()=>{
       renameRoom(state.fvSelectedRoomId);
       renderFloorView();
