@@ -893,8 +893,8 @@ table.preview-table tr:hover{ background: var(--sdc-paper-dim); }
           <strong style="color:var(--sdc-navy); font-size:13px; flex-shrink:0;">Floor View</strong>
           <select id="fvFloorSelect"></select>
           <select id="fvDrawingSelect"></select>
-          <button class="tb-btn" id="btnFvUploadDrawing" title="Upload an image to use as a drawing for this floor">+ Add drawing</button>
-          <input type="file" id="fvUploadInput" accept="image/*" style="display:none;">
+          <button class="tb-btn" id="btnFvUploadDrawing" title="Add a PDF as an additional drawing for this floor — it won't replace any drawing already here">+ Add drawing (PDF)</button>
+          <input type="file" id="fvUploadInput" accept="application/pdf,.pdf" style="display:none;">
           <button class="tb-btn" id="btnFvRemoveDrawing" title="Remove this uploaded drawing from the floor" style="display:none;">Remove drawing</button>
           <button class="tb-btn" id="btnFvPlaceRoom" title="Click a spot on the drawing to add a room there">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -2734,23 +2734,43 @@ function setFvZoom(z){
   document.getElementById('fvZoomVal').textContent = Math.round(state.fvZoom * 100) + '%';
 }
 
-// Upload an image as a new drawing scoped to the given floor, register it,
-// and switch Floor View to show it immediately.
-function addCustomDrawing(floorId, file){
-  const reader = new FileReader();
-  reader.onload = (ev)=>{
+// Upload a PDF as a new drawing scoped to the given floor, register it, and
+// switch Floor View to show it immediately. This ADDS to the floor's
+// drawings — it never touches or replaces any drawing already there.
+async function addCustomDrawing(floorId, file){
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  if(!isPdf){
+    toast('Only PDF files can be added as drawings', 'err');
+    return;
+  }
+  if(!window['pdfjsLib']){
+    toast('PDF support did not load — check your connection and try again', 'err');
+    return;
+  }
+  try{
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
     pushHistory();
     const id = 'cd-' + Math.random().toString(36).slice(2,9);
-    state.customDrawings[id] = { id, floorId, label: file.name.replace(/\.[^.]+$/, ''), src: ev.target.result };
+    const label = file.name.replace(/\.[^.]+$/, '') + (pdf.numPages > 1 ? ' (p.1)' : '');
+    state.customDrawings[id] = { id, floorId, label, src: canvas.toDataURL('image/png') };
     state.fvDrawingId = id;
     state.fvZoom = 1;
     renderDrawingSelect();
     renderFloorView();
     saveState();
-    toast(`Added drawing "${state.customDrawings[id].label}"`);
-  };
-  reader.onerror = ()=> toast('Could not read that image file', 'err');
-  reader.readAsDataURL(file);
+    toast(`Added drawing "${label}"` + (pdf.numPages > 1 ? ' — only page 1 was used' : ''));
+  }catch(err){
+    console.error(err);
+    toast(`Could not read that PDF (${err.message || 'unknown error'})`, 'err');
+  }
 }
 
 function removeCustomDrawing(drawingId){
