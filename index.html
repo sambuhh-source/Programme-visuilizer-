@@ -2664,6 +2664,23 @@ function setPlacementMode(roomIdOrNull){
     : 'Rooms with tasks active in the current window are highlighted green';
 }
 
+// The programme heading a task sits under, e.g. "Slab Penetrations", taken from
+// its path in the Best Build Programme. Leading path parts that only repeat the
+// floor's own name are dropped, as Floor View already shows the floor. Looks the
+// path up by task id first because the notes field can be overwritten with site
+// notes (a duplicated room's tasks keep the original id before "-copy-"). Tasks
+// from elsewhere only have a heading if their notes hold a " > " path.
+const TASK_PATHS = new Map(STIRLING_REAL_DATA.tasks.map(t=>[t.id, t.notes]));
+function taskHeading(task, floor){
+  const known = TASK_PATHS.get(String(task.id).split('-copy-')[0]);
+  const path = known || task.notes || '';
+  if(!known && !path.includes(' > ')) return '';
+  const parts = path.split(' > ').map(s=>s.trim()).filter(Boolean);
+  const floorParts = (floor ? floor.name : '').split(' – ').map(s=>s.trim());
+  while(parts.length && floorParts.includes(parts[0])) parts.shift();
+  return parts.join(' › ');
+}
+
 function renderFloorView(){
   const floorId = state.floorViewFloorId;
   const floor = state.floors.find(f=>f.id===floorId);
@@ -2843,7 +2860,8 @@ function renderFloorView(){
     const card = document.createElement('div');
     card.className = 'fv-task-card';
     card.style.borderLeftColor = tradeColor(t.trade);
-    card.innerHTML = `<div class="fv-tn">${escapeHtml(t.name)}</div><div class="fv-tm">${t.trade} · ${fmtDateDisplay(t.start)} → ${fmtDateDisplay(t.end)} · ${t.progress}%</div>`;
+    const heading = taskHeading(t, floor);
+    card.innerHTML = `<div class="fv-tn">${heading ? `(${escapeHtml(heading)}) ` : ''}${escapeHtml(t.name)}</div><div class="fv-tm">${t.trade} · ${fmtDateDisplay(t.start)} → ${fmtDateDisplay(t.end)} · ${t.progress}%</div>`;
     card.addEventListener('click', ()=>{
       closeFloorView();
       openDetailPanel(t.id);
